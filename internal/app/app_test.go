@@ -8,14 +8,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/yggy-tech/yggy-cli/internal/api"
 	"github.com/yggy-tech/yggy-cli/internal/config"
+	"github.com/yggy-tech/yggy-cli/internal/devicelogin"
 )
 
 type fakeAPI struct {
 	orgs       []api.Org
 	projects   []api.Project
+	user       string
 	documentID string
 	status     api.DocumentStatus
 	triples    []byte
@@ -38,6 +41,8 @@ func (f fakeAPI) Call(_ context.Context, req api.Request, out io.Writer) error {
 func (f fakeAPI) Account(context.Context) ([]api.Org, string, error) {
 	return f.orgs, "", f.err
 }
+
+func (f fakeAPI) User(context.Context) (string, error) { return f.user, nil }
 
 func (f fakeAPI) Projects(context.Context, string) ([]api.Project, error) {
 	return f.projects, f.err
@@ -387,5 +392,143 @@ func TestUpdateReportsFailures(t *testing.T) {
 	a, _, errOut := updateApp("0.1.0", fakeUpdater{err: errors.New("no network")})
 	if code := a.Run([]string{"update"}); code != 1 || !strings.Contains(errOut.String(), "no network") {
 		t.Fatalf("code %d, err %q", code, errOut.String())
+	}
+}
+
+type fakeDevice struct {
+	key      string
+	startErr error
+	waitErr  error
+	baseURL  string
+}
+
+func (f *fakeDevice) Start(context.Context) (devicelogin.Code, error) {
+	return devicelogin.Code{
+		DeviceCode: "dc", UserCode: "ABCD-EFGH",
+		VerificationURI:         "https://app.yggy.tech/device",
+		VerificationURIComplete: "https://app.yggy.tech/device?user_code=ABCD-EFGH",
+	}, f.startErr
+}
+
+func (f *fakeDevice) Wait(context.Context, devicelogin.Code) (string, error) { return f.key, f.waitErr }
+
+func webApp(t *testing.T, device *fakeDevice, opened *[]string) (*App, string, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.json")
+	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+	return &App{
+		In:         strings.NewReader(""),
+		Out:        out,
+		Err:        errOut,
+		ConfigPath: path,
+		API:        fakeAPI{user: "ada@example.com", orgs: []api.Org{{ID: "org-1", Slug: "acme-corp", Name: "Acme"}}},
+		NewDeviceLogin: func(baseURL string) DeviceLogin {
+			device.baseURL = baseURL
+			return device
+		},
+		OpenBrowser: func(url string) error { *opened = append(*opened, url); return nil },
+	}, path, out, errOut
+}
+
+func TestWebLoginOpensTheBrowserAndStoresTheIssuedKey(t *testing.T) {
+	var opened []string
+	device := &fakeDevice{key: "ygg_from_browser"}
+	a, path, out, errOut := webApp(t, device, &opened)
+	if code := a.Run([]string{"auth", "login", "--web", "--base-url", "https://api.dev.yggy.tech/"}); code != 0 {
+		t.Fatalf("code %d stderr %s", code, errOut.String())
+	}
+	if device.baseURL != "https://api.dev.yggy.tech" {
+		t.Fatalf("base url = %q", device.baseURL)
+	}
+	if len(opened) != 1 || opened[0] != "https://app.yggy.tech/device?user_code=ABCD-EFGH" {
+		t.Fatalf("opened %v", opened)
+	}
+	for _, want := range []string{"ABCD-EFGH", "Do not approve a code you did not start"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr %q lacks %q", errOut.String(), want)
+		}
+	}
+	if !strings.Contains(out.String(), "logged in as ada@example.com") || !strings.Contains(out.String(), "org acme-corp (Acme)") {
+		t.Fatalf("stdout %q", out.String())
+	}
+	file, err := config.Load(path)
+	if err != nil || file.APIKey != "ygg_from_browser" || file.BaseURL != "https://api.dev.yggy.tech" {
+		t.Fatalf("file %#v err %v", file, err)
+	}
+}
+
+func TestWebLoginWithNoBrowserOnlyPrintsTheAddress(t *testing.T) {
+	var opened []string
+	a, _, _, errOut := webApp(t, &fakeDevice{key: "ygg_k"}, &opened)
+	if code := a.Run([]string{"auth", "login", "--web", "--no-browser", "--base-url", "https://api.yggy.tech"}); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if len(opened) != 0 || !strings.Contains(errOut.String(), "Open https://app.yggy.tech/device?user_code=ABCD-EFGH in your browser") {
+		t.Fatalf("opened %v stderr %q", opened, errOut.String())
+	}
+}
+
+func TestWebLoginIgnoresTheKeyVariableAndRefusesAKeyFlag(t *testing.T) {
+	var opened []string
+	a, path, _, _ := webApp(t, &fakeDevice{key: "ygg_from_browser"}, &opened)
+	a.Env = func(name string) string {
+		if name == "YGGY_API_KEY" {
+			return "ygg_from_env"
+		}
+		return ""
+	}
+	if code := a.Run([]string{"auth", "login", "--web", "--base-url", "https://api.yggy.tech"}); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if file, _ := config.Load(path); file.APIKey != "ygg_from_browser" {
+		t.Fatalf("stored %q, want the browser key", file.APIKey)
+	}
+	if code := a.Run([]string{"auth", "login", "--web", "--api-key", "ygg_x"}); code != 2 {
+		t.Fatalf("--web with --api-key: code %d, want 2", code)
+	}
+}
+
+func TestWebLoginReportsDenialAndStoresNothing(t *testing.T) {
+	var opened []string
+	a, path, _, errOut := webApp(t, &fakeDevice{waitErr: devicelogin.ErrDenied}, &opened)
+	if code := a.Run([]string{"auth", "login", "--web", "--base-url", "https://api.yggy.tech"}); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	if !strings.Contains(errOut.String(), "denied") {
+		t.Fatalf("stderr %q", errOut.String())
+	}
+	if file, _ := config.Load(path); file.APIKey != "" {
+		t.Fatalf("a key %q was stored for a denied login", file.APIKey)
+	}
+}
+
+func TestInteractiveLoginOffersTheBrowserFirst(t *testing.T) {
+	var opened []string
+	a, path, _, errOut := webApp(t, &fakeDevice{key: "ygg_from_browser"}, &opened)
+	a.Interactive = true
+	a.In = iotest.OneByteReader(strings.NewReader("\n"))
+	if code := a.Run([]string{"auth", "login", "--base-url", "https://api.yggy.tech"}); code != 0 {
+		t.Fatalf("code %d stderr %s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "How do you want to log in?") {
+		t.Fatalf("stderr %q", errOut.String())
+	}
+	if file, _ := config.Load(path); file.APIKey != "ygg_from_browser" {
+		t.Fatalf("stored %q", file.APIKey)
+	}
+}
+
+func TestInteractiveLoginCanStillUseAPastedKey(t *testing.T) {
+	var opened []string
+	device := &fakeDevice{key: "ygg_from_browser"}
+	a, path, _, _ := webApp(t, device, &opened)
+	a.Interactive = true
+	// One byte per read, like a terminal, so each prompt takes only its own line.
+	a.In = iotest.OneByteReader(strings.NewReader("2\nygg_pasted\n"))
+	if code := a.Run([]string{"auth", "login", "--base-url", "https://api.yggy.tech"}); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if file, _ := config.Load(path); file.APIKey != "ygg_pasted" || len(opened) != 0 {
+		t.Fatalf("stored %q opened %v", file.APIKey, opened)
 	}
 }
