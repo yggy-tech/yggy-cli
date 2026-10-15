@@ -49,7 +49,8 @@
       "bump-patch-for-minor-pre-major": false,
       "include-v-in-tag": true,
       "pull-request-title-pattern": "chore: release ${version}",
-      "release-type": "go"
+      "release-type": "go",
+      "initial-version": "0.1.0"
     }
   },
   "bootstrap-sha": "8be2aa7ea97a81af61a2f19aabe62d2182f7b503"
