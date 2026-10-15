@@ -32,13 +32,11 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
+# release-please creates the GitHub release with its notes; GoReleaser only attaches the assets.
 release:
+  mode: keep-existing
   extra_files:
     - glob: install.sh
 
 changelog:
-  use: github
-  filters:
-    exclude:
-      - "^ci:"
-      - "^docs:"
+  disable: true

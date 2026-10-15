@@ -22,6 +22,7 @@ const defaultBaseURL = "https://api.yggy.tech"
 
 type API interface {
 	Account(ctx context.Context) ([]api.Org, string, error)
+	User(ctx context.Context) (string, error)
 	Projects(ctx context.Context, orgHeader string) ([]api.Project, error)
 	Upload(ctx context.Context, organization, projectID, filePath string) (string, error)
 	DocumentStatus(ctx context.Context, organization, projectID, documentID string) (api.DocumentStatus, error)
@@ -50,6 +51,10 @@ type App struct {
 	Updater Updater
 	// ExePath returns the path of the running binary. It defaults to os.Executable.
 	ExePath func() (string, error)
+	// NewDeviceLogin builds the browser login for an API base URL. It defaults to the real one.
+	NewDeviceLogin func(baseURL string) DeviceLogin
+	// OpenBrowser opens a page in the default browser. Without it the login only prints the address.
+	OpenBrowser func(url string) error
 }
 
 func (a *App) Run(args []string) int {
@@ -113,7 +118,7 @@ func (a *App) usage() {
 	fmt.Fprint(a.Err, `yggy — CLI for the yggy API
 
 Usage:
-  yggy auth login [--base-url URL] [--api-key KEY]
+  yggy auth login [--base-url URL] [--api-key KEY | --web] [--no-browser]
   yggy use org [name]
   yggy use project [name]
   yggy context
@@ -129,7 +134,8 @@ Usage:
   yggy update [--check] [--version X.Y.Z]   update yggy to the latest release
   yggy version
 
-Login stores the API URL and key. use selects an organization or project
+Login stores the API URL and key. In a terminal it offers the browser or an API key; --web
+always uses the browser and prints the address when --no-browser is set. use selects an organization or project
 that this key can already see. Document commands use the selected project.
 query uses the selected project, or the whole organization when no project is selected.
 `)
@@ -140,6 +146,8 @@ func (a *App) login(args []string) int {
 	fs.SetOutput(a.Err)
 	baseFlag := fs.String("base-url", "", "API base URL")
 	keyFlag := fs.String("api-key", "", "API key")
+	webFlag := fs.Bool("web", false, "log in with your browser instead of an API key")
+	noBrowserFlag := fs.Bool("no-browser", false, "print the login address instead of opening it")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -153,7 +161,37 @@ func (a *App) login(args []string) int {
 		}
 		base = firstNonEmpty(entered, defaultBaseURL)
 	}
-	key := firstNonEmpty(*keyFlag, a.env("YGGY_API_KEY"))
+	if *webFlag && *keyFlag != "" {
+		fmt.Fprintln(a.Err, "--web and --api-key cannot be combined")
+		return 2
+	}
+	key := ""
+	if !*webFlag {
+		key = firstNonEmpty(*keyFlag, a.env("YGGY_API_KEY"))
+	}
+	useBrowser := *webFlag
+	if key == "" && !useBrowser && a.Interactive {
+		choice, err := a.promptLine("How do you want to log in?\n  1) in your browser\n  2) with an API key\nChoose [1]: ")
+		if err != nil {
+			fmt.Fprintln(a.Err, err)
+			return 1
+		}
+		switch strings.TrimSpace(choice) {
+		case "", "1":
+			useBrowser = true
+		case "2":
+		default:
+			fmt.Fprintln(a.Err, "choose 1 or 2")
+			return 2
+		}
+	}
+	if useBrowser {
+		granted, code := a.browserLogin(context.Background(), strings.TrimRight(base, "/"), *noBrowserFlag)
+		if code != 0 {
+			return code
+		}
+		key = granted
+	}
 	if key == "" {
 		entered, err := a.promptSecret("API key: ")
 		if err != nil {
@@ -168,6 +206,12 @@ func (a *App) login(args []string) int {
 	}
 
 	file := config.File{BaseURL: strings.TrimRight(base, "/"), APIKey: key}
+	if useBrowser {
+		// Whoever approves a code gets the key, so name the account the key belongs to.
+		if who, err := a.client(file).User(context.Background()); err == nil && who != "" {
+			fmt.Fprintf(a.Out, "logged in as %s\n", who)
+		}
+	}
 	orgs, _, err := a.client(file).Account(context.Background())
 	if err != nil {
 		fmt.Fprintln(a.Err, err)

@@ -146,3 +146,25 @@ func TestCallIndentsJSONAndReportsErrors(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestUserNamesTheAccountOfTheKey(t *testing.T) {
+	cases := map[string]struct{ body, want string }{
+		"email":      {`{"user":{"email":"ada@example.com","name":"Ada"},"session":{}}`, "ada@example.com"},
+		"name":       {`{"user":{"name":"Ada"}}`, "Ada"},
+		"no user":    {`{"session":{}}`, ""},
+		"signed out": {`null`, ""},
+	}
+	for name, tc := range cases {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v1/auth/get-session" {
+				t.Errorf("%s: path %s", name, r.URL.Path)
+			}
+			_, _ = w.Write([]byte(tc.body))
+		}))
+		got, err := (&Client{BaseURL: srv.URL, APIKey: "ygg_x"}).User(context.Background())
+		srv.Close()
+		if err != nil || got != tc.want {
+			t.Errorf("%s: User() = %q, %v; want %q", name, got, err, tc.want)
+		}
+	}
+}

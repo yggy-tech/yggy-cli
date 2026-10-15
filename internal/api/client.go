@@ -146,6 +146,33 @@ func (c *Client) sessionOrgID(ctx context.Context) (string, error) {
 	return payload.Session.ActiveOrganizationID, nil
 }
 
+// User returns the email (or name) of the account the key belongs to, "" when the API reports none.
+func (c *Client) User(ctx context.Context) (string, error) {
+	body, err := c.get(ctx, "/api/v1/auth/get-session", "")
+	if err != nil {
+		return "", err
+	}
+	if len(body) == 0 || string(body) == "null" {
+		return "", nil
+	}
+	var payload struct {
+		User *struct {
+			Email string `json:"email"`
+			Name  string `json:"name"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", fmt.Errorf("read session: %w", err)
+	}
+	if payload.User == nil {
+		return "", nil
+	}
+	if payload.User.Email != "" {
+		return payload.User.Email, nil
+	}
+	return payload.User.Name, nil
+}
+
 func (c *Client) projectPage(ctx context.Context, orgHeaderValue string, offset int) (projectPage, error) {
 	path := fmt.Sprintf("/api/v1/projects?limit=100&offset=%d&sortBy=createdAt&sortDir=asc", offset)
 	body, err := c.get(ctx, path, orgHeaderValue)
