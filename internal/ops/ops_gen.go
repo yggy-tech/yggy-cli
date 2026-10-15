@@ -15,7 +15,7 @@ var Operations = []Operation{
 	{ID: "getEntityByIdentity", Method: "GET", Path: "/api/v1/projects/{projectId}/graph/entities/by-identity", Summary: "Read an organization entity and this project's facts about it", PathParams: []string{"projectId"}, QueryParams: []string{"uri"}, Required: []string{"uri"}},
 	{ID: "getOntologyOverview", Method: "GET", Path: "/api/v1/projects/{projectId}/ontology/overview", Summary: "Project ontology summary", PathParams: []string{"projectId"}},
 	{ID: "listDocumentTriples", Method: "GET", Path: "/api/v1/projects/{projectId}/documents/{id}/triples", Summary: "Get triples extracted from a document (project-scoped)", PathParams: []string{"projectId", "id"}},
-	{ID: "listDocuments", Method: "GET", Path: "/api/v1/projects/{projectId}/documents", Summary: "List documents for a project", PathParams: []string{"projectId"}, QueryParams: []string{"status", "archived", "limit", "offset", "sortBy", "sortDir", "q", "folderId", "sagaKind"}},
+	{ID: "listDocuments", Method: "GET", Path: "/api/v1/projects/{projectId}/documents", Summary: "List documents for a project", PathParams: []string{"projectId"}, QueryParams: []string{"status", "archived", "limit", "offset", "sortBy", "sortDir", "q", "folderId", "noteKind"}},
 	{ID: "listGraphExports", Method: "GET", Path: "/api/v1/projects/{projectId}/graph-exports", Summary: "List project graph exports from the last 7 days", PathParams: []string{"projectId"}},
 	{ID: "listProjects", Method: "GET", Path: "/api/v1/projects", Summary: "List organization projects", QueryParams: []string{"limit", "offset", "q", "sortBy", "sortDir"}},
 	{ID: "queryOrganization", Method: "POST", Path: "/api/v1/query", Summary: "Retrieve ranked documents across the organization", Body: "json"},
