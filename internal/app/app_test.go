@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"path/filepath"
 	"strings"
@@ -288,5 +289,103 @@ func TestUploadAndQueryUseTheSavedContext(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "doc-9") || !strings.Contains(stdout.String(), "Q4 changed.") {
 		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+type fakeUpdater struct {
+	latest    string
+	err       error
+	installed *[]string
+}
+
+func (f fakeUpdater) Latest(context.Context) (string, error) { return f.latest, f.err }
+
+func (f fakeUpdater) Install(_ context.Context, version, exePath string) error {
+	if f.installed != nil {
+		*f.installed = append(*f.installed, version+"@"+exePath)
+	}
+	return f.err
+}
+
+func updateApp(version string, updater Updater) (*App, *bytes.Buffer, *bytes.Buffer) {
+	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+	return &App{
+		Out:     out,
+		Err:     errOut,
+		Version: version,
+		Updater: updater,
+		ExePath: func() (string, error) { return "/usr/local/bin/yggy", nil },
+	}, out, errOut
+}
+
+func TestVersionPrintsTheRelease(t *testing.T) {
+	a, out, _ := updateApp("1.2.3", nil)
+	if code := a.Run([]string{"version"}); code != 0 || out.String() != "yggy 1.2.3\n" {
+		t.Fatalf("code %d, out %q", code, out.String())
+	}
+}
+
+func TestUpdateInstallsTheLatestRelease(t *testing.T) {
+	var installed []string
+	a, out, _ := updateApp("0.1.0", fakeUpdater{latest: "0.2.0", installed: &installed})
+	if code := a.Run([]string{"update"}); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if len(installed) != 1 || installed[0] != "0.2.0@/usr/local/bin/yggy" {
+		t.Fatalf("installed %v", installed)
+	}
+	if !strings.Contains(out.String(), "updated yggy 0.1.0 -> 0.2.0") {
+		t.Fatalf("out %q", out.String())
+	}
+}
+
+func TestUpdateDoesNothingWhenCurrent(t *testing.T) {
+	var installed []string
+	a, out, _ := updateApp("0.2.0", fakeUpdater{latest: "0.2.0", installed: &installed})
+	if code := a.Run([]string{"update"}); code != 0 || len(installed) != 0 {
+		t.Fatalf("code %d, installed %v", code, installed)
+	}
+	if !strings.Contains(out.String(), "up to date") {
+		t.Fatalf("out %q", out.String())
+	}
+}
+
+func TestUpdateCheckOnlyReports(t *testing.T) {
+	var installed []string
+	a, out, _ := updateApp("0.1.0", fakeUpdater{latest: "0.2.0", installed: &installed})
+	if code := a.Run([]string{"update", "--check"}); code != 0 || len(installed) != 0 {
+		t.Fatalf("code %d, installed %v", code, installed)
+	}
+	if !strings.Contains(out.String(), "update available: 0.1.0 -> 0.2.0") {
+		t.Fatalf("out %q", out.String())
+	}
+}
+
+func TestUpdateSpecificVersionSkipsTheLookup(t *testing.T) {
+	var installed []string
+	a, _, _ := updateApp("0.3.0", fakeUpdater{err: nil, installed: &installed})
+	if code := a.Run([]string{"update", "--version", "v0.2.0"}); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if len(installed) != 1 || !strings.HasPrefix(installed[0], "0.2.0@") {
+		t.Fatalf("installed %v", installed)
+	}
+}
+
+func TestUpdateRefusesToOverwriteASourceBuild(t *testing.T) {
+	var installed []string
+	a, _, errOut := updateApp("dev", fakeUpdater{latest: "0.2.0", installed: &installed})
+	if code := a.Run([]string{"update"}); code != 1 || len(installed) != 0 {
+		t.Fatalf("code %d, installed %v", code, installed)
+	}
+	if !strings.Contains(errOut.String(), "built from source") {
+		t.Fatalf("err %q", errOut.String())
+	}
+}
+
+func TestUpdateReportsFailures(t *testing.T) {
+	a, _, errOut := updateApp("0.1.0", fakeUpdater{err: errors.New("no network")})
+	if code := a.Run([]string{"update"}); code != 1 || !strings.Contains(errOut.String(), "no network") {
+		t.Fatalf("code %d, err %q", code, errOut.String())
 	}
 }

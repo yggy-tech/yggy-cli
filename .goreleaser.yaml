@@ -1,0 +1,44 @@
+# Builds the yggy release archives. Run by .github/workflows/release.yml in the public
+# yggy-cli repository on a v* tag. The module path below is the public one: the sync
+# rewrites Go imports but not this file.
+version: 2
+project_name: yggy
+
+builds:
+  - id: yggy
+    main: .
+    binary: yggy
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/yggy-tech/yggy-cli/internal/version.Version={{ .Version }}
+
+archives:
+  - id: yggy
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    # yggy update and install.sh download these exact names.
+    name_template: "yggy_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  extra_files:
+    - glob: install.sh
+
+changelog:
+  use: github
+  filters:
+    exclude:
+      - "^ci:"
+      - "^docs:"

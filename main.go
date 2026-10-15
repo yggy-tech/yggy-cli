@@ -3,9 +3,12 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/yggy-tech/yggy-cli/internal/app"
 	"github.com/yggy-tech/yggy-cli/internal/config"
+	"github.com/yggy-tech/yggy-cli/internal/update"
+	"github.com/yggy-tech/yggy-cli/internal/version"
 	"golang.org/x/term"
 )
 
@@ -23,5 +26,7 @@ func main() {
 		ConfigPath:  path,
 		Env:         os.Getenv,
 		Interactive: term.IsTerminal(int(os.Stdin.Fd())),
+		Version:     version.Version,
+		Updater:     update.New(runtime.GOOS, runtime.GOARCH),
 	}).Run(os.Args[1:]))
 }

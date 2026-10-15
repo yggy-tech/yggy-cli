@@ -30,6 +30,12 @@ type API interface {
 	Call(ctx context.Context, req api.Request, out io.Writer) error
 }
 
+// Updater finds and installs yggy releases.
+type Updater interface {
+	Latest(ctx context.Context) (string, error)
+	Install(ctx context.Context, version, exePath string) error
+}
+
 type App struct {
 	In          io.Reader
 	Out         io.Writer
@@ -39,6 +45,11 @@ type App struct {
 	API         API
 	Env         func(string) string
 	Interactive bool
+	// Version is the running release, or "dev" for a build from source.
+	Version string
+	Updater Updater
+	// ExePath returns the path of the running binary. It defaults to os.Executable.
+	ExePath func() (string, error)
 }
 
 func (a *App) Run(args []string) int {
@@ -50,6 +61,11 @@ func (a *App) Run(args []string) int {
 	case "help", "-h", "--help":
 		a.usage()
 		return 0
+	case "version", "-v", "--version":
+		fmt.Fprintf(a.Out, "yggy %s\n", a.Version)
+		return 0
+	case "update":
+		return a.update(args[1:])
 	case "context":
 		return a.showContext()
 	case "auth":
@@ -109,6 +125,9 @@ Usage:
 
   yggy api                       list the operations of the public API
   yggy api <operation> [args]    call one, e.g. yggy api getDocumentStatus id=<id>
+
+  yggy update [--check] [--version X.Y.Z]   update yggy to the latest release
+  yggy version
 
 Login stores the API URL and key. use selects an organization or project
 that this key can already see. Document commands use the selected project.
