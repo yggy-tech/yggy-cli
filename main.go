@@ -27,6 +27,7 @@ func main() {
 		ConfigPath:  path,
 		Env:         os.Getenv,
 		Interactive: term.IsTerminal(int(os.Stdin.Fd())),
+		Styled:      term.IsTerminal(int(os.Stdout.Fd())) && os.Getenv("NO_COLOR") == "",
 		Version:     version.Version,
 		Updater:     update.New(runtime.GOOS, runtime.GOARCH),
 		OpenBrowser: browser.Open,

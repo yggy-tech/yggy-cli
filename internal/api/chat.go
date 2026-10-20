@@ -13,6 +13,19 @@ import (
 // chatTimeout bounds one answer. The agent searches the graph before it writes, which outlasts the default timeout.
 const chatTimeout = 5 * time.Minute
 
+// ChatMessage is one earlier turn of a conversation. Role is user or assistant.
+type ChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// ChatRequest is one question. History carries the earlier turns, oldest first. An empty Tier uses the API default.
+type ChatRequest struct {
+	Message string
+	History []ChatMessage
+	Tier    string
+}
+
 type ChatCitation struct {
 	DocumentID string `json:"documentId"`
 	Source     string `json:"source"`
@@ -27,15 +40,17 @@ type ChatResult struct {
 }
 
 // Chat asks the graph agent a question in one project, or across the organization when projectID is empty.
-// tier is fast, balanced or accurate; empty uses the API default.
-func (c *Client) Chat(ctx context.Context, organization, projectID, message, tier string) (ChatResult, error) {
+func (c *Client) Chat(ctx context.Context, organization, projectID string, req ChatRequest) (ChatResult, error) {
 	path := "/api/v1/chat"
 	if projectID != "" {
 		path = "/api/v1/projects/" + url.PathEscape(projectID) + "/chat"
 	}
-	request := map[string]any{"message": message}
-	if tier != "" {
-		request["options"] = map[string]string{"tier": tier}
+	request := map[string]any{"message": req.Message}
+	if len(req.History) > 0 {
+		request["history"] = req.History
+	}
+	if req.Tier != "" {
+		request["options"] = map[string]string{"tier": req.Tier}
 	}
 	payload, err := json.Marshal(request)
 	if err != nil {

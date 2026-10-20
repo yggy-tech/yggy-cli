@@ -68,7 +68,7 @@ yggy ask "Which contracts renew in Q1?"
 yggy query "contract renewal Q1"
 ```
 
-`yggy ask` writes an answer and lists the documents it used. `yggy query` only finds the matching documents and ranks them. `yggy orgs`, `yggy projects` and `yggy documents list` show what you can work with. `yggy <command> --help` prints the options of one command.
+`yggy ask` writes an answer and lists the documents it used. `yggy chat` keeps a conversation going so you can ask follow-ups. `yggy query` only finds the matching documents and ranks them. `yggy orgs`, `yggy projects` and `yggy documents list` show what you can work with. `yggy <command> --help` prints the options of one command.
 
 `yggy api` lists every operation of the public API. `yggy api <operation> name=value` calls one, for example `yggy api getDocumentStatus id=<id>`. `yggy help` prints all commands.
 
