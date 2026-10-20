@@ -33,21 +33,14 @@ func (a *App) ask(args []string) int {
 	if question == "" {
 		return a.misuse("ask")
 	}
-	if *tier != "" && !slices.Contains(chatTiers, *tier) {
-		fmt.Fprintf(a.Err, "--tier is one of %s\n", strings.Join(chatTiers, ", "))
-		return 2
+	if code := a.checkTier(*tier); code != 0 {
+		return code
 	}
 	file, code := a.orgContext()
 	if code != 0 {
 		return code
 	}
-	if a.Interactive {
-		fmt.Fprint(a.Err, "thinking…")
-	}
-	result, err := a.client(file).Chat(context.Background(), file.Org.Header(), file.Project.ID, question, *tier)
-	if a.Interactive {
-		fmt.Fprint(a.Err, "\r\033[K")
-	}
+	result, err := a.sendChat(file, api.ChatRequest{Message: question, Tier: *tier})
 	if err != nil {
 		fmt.Fprintln(a.Err, err)
 		return 1
@@ -55,18 +48,41 @@ func (a *App) ask(args []string) int {
 	if *asJSON {
 		return a.printJSON(result.Raw)
 	}
-	fmt.Fprintln(a.Out, strings.TrimSpace(result.Response))
-	sources := citedDocuments(result.Citations)
-	if len(sources) > 0 {
-		fmt.Fprintln(a.Out, "\nSources")
-		for i, citation := range sources {
-			fmt.Fprintf(a.Out, "  %d. %s\n", i+1, firstNonEmpty(citation.Source, citation.DocumentID))
-			if snippet := oneLine(citation.Snippet); snippet != "" {
-				fmt.Fprintf(a.Out, "     %s\n", snippet)
-			}
-		}
+	a.printAnswer(result)
+	return 0
+}
+
+func (a *App) checkTier(tier string) int {
+	if tier != "" && !slices.Contains(chatTiers, tier) {
+		fmt.Fprintf(a.Err, "--tier is one of %s\n", strings.Join(chatTiers, ", "))
+		return 2
 	}
 	return 0
+}
+
+// sendChat asks the agent, with a waiting note on the terminal while it works.
+func (a *App) sendChat(file config.File, req api.ChatRequest) (api.ChatResult, error) {
+	if a.Interactive {
+		fmt.Fprint(a.Err, "thinking…")
+		defer fmt.Fprint(a.Err, "\r\033[K")
+	}
+	return a.client(file).Chat(context.Background(), file.Org.Header(), file.Project.ID, req)
+}
+
+// printAnswer prints the agent's answer and, once per document, the sources it cited.
+func (a *App) printAnswer(result api.ChatResult) {
+	fmt.Fprintln(a.Out, a.render(strings.TrimSpace(result.Response)))
+	sources := citedDocuments(result.Citations)
+	if len(sources) == 0 {
+		return
+	}
+	fmt.Fprintln(a.Out, "\nSources")
+	for i, citation := range sources {
+		fmt.Fprintf(a.Out, "  %d. %s\n", i+1, firstNonEmpty(citation.Source, citation.DocumentID))
+		if snippet := oneLine(citation.Snippet); snippet != "" {
+			fmt.Fprintf(a.Out, "     %s\n", snippet)
+		}
+	}
 }
 
 // query runs `yggy query <question>`: ranked documents with the passage that best matches.

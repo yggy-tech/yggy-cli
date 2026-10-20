@@ -128,7 +128,11 @@ func TestChatUsesTheProjectOrTheOrganization(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
 		body, _ := io.ReadAll(r.Body)
-		if string(body) != `{"message":"who founded Acme?","options":{"tier":"fast"}}` {
+		want := `{"message":"who founded Acme?","options":{"tier":"fast"}}`
+		if len(paths) == 2 {
+			want = `{"history":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"}],"message":"who founded Acme?"}`
+		}
+		if string(body) != want {
 			t.Errorf("body = %s", body)
 		}
 		_, _ = w.Write([]byte(`{"success":true,"data":{"response":"Jane Doe.","citations":[{"documentId":"doc-1","snippet":"founded by Jane"}],"metadata":{"processingTimeMs":5,"tierApplied":"fast"}}}`))
@@ -136,11 +140,12 @@ func TestChatUsesTheProjectOrTheOrganization(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{BaseURL: server.URL, APIKey: "ygg_k", HTTP: server.Client()}
-	result, err := client.Chat(context.Background(), "org-1", "proj-1", "who founded Acme?", "fast")
+	result, err := client.Chat(context.Background(), "org-1", "proj-1", ChatRequest{Message: "who founded Acme?", Tier: "fast"})
 	if err != nil || result.Response != "Jane Doe." || len(result.Citations) != 1 || result.Citations[0].DocumentID != "doc-1" {
 		t.Fatalf("result = %#v err = %v", result, err)
 	}
-	if _, err := client.Chat(context.Background(), "org-1", "", "who founded Acme?", "fast"); err != nil {
+	history := []ChatMessage{{Role: "user", Content: "hi"}, {Role: "assistant", Content: "hello"}}
+	if _, err := client.Chat(context.Background(), "org-1", "", ChatRequest{Message: "who founded Acme?", History: history}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(paths, " ") != "/api/v1/projects/proj-1/chat /api/v1/chat" {

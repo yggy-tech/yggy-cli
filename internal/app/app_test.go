@@ -30,6 +30,7 @@ type fakeAPI struct {
 	calls      *[]api.Request
 	queries    *[]api.QueryRequest
 	asked      *[]string
+	chats      *[]api.ChatRequest
 }
 
 func (f fakeAPI) Call(_ context.Context, req api.Request, out io.Writer) error {
@@ -98,12 +99,15 @@ func (f fakeAPI) Query(_ context.Context, _, _ string, req api.QueryRequest) (ap
 	return api.QueryResult{Answer: f.answer, Contexts: contexts, Raw: []byte(`{"answer":""}`)}, nil
 }
 
-func (f fakeAPI) Chat(_ context.Context, _, projectID, message, tier string) (api.ChatResult, error) {
-	if f.err != nil {
-		return api.ChatResult{}, f.err
+func (f fakeAPI) Chat(_ context.Context, _, projectID string, req api.ChatRequest) (api.ChatResult, error) {
+	if f.chats != nil {
+		*f.chats = append(*f.chats, req)
+	}
+	if f.err != nil || req.Message == "fail" {
+		return api.ChatResult{}, errors.New("chat service error")
 	}
 	if f.asked != nil {
-		*f.asked = append(*f.asked, projectID+"|"+message+"|"+tier)
+		*f.asked = append(*f.asked, projectID+"|"+req.Message+"|"+req.Tier)
 	}
 	return api.ChatResult{
 		Response: f.answer,
@@ -711,5 +715,62 @@ func TestDocumentsListShowsATableAndTheRemainder(t *testing.T) {
 	}
 	if code := a.Run([]string{"documents", "list", "--status", "done"}); code != 2 {
 		t.Fatalf("bad status: code %d", code)
+	}
+}
+
+func TestChatKeepsTheConversationAndStartsOver(t *testing.T) {
+	var chats []api.ChatRequest
+	a, out, errOut := contextApp(t, fakeAPI{answer: "an answer", chats: &chats}, true)
+	a.In = strings.NewReader("who founded Acme?\n\nfail\nand when?\n/new\nfresh question\n/exit\nnever sent\n")
+	if code := a.Run([]string{"chat", "--tier", "fast"}); code != 1 {
+		t.Fatalf("code %d, want 1 after a failed question", code)
+	}
+	if len(chats) != 4 {
+		t.Fatalf("sent %d questions: %#v", len(chats), chats)
+	}
+	if len(chats[0].History) != 0 || chats[0].Tier != "fast" {
+		t.Fatalf("first %#v", chats[0])
+	}
+	// The failed question is not part of the history.
+	if len(chats[2].History) != 2 || chats[2].History[0].Content != "who founded Acme?" || chats[2].History[1].Content != "an answer" {
+		t.Fatalf("follow-up history %#v", chats[2].History)
+	}
+	if chats[3].Message != "fresh question" || len(chats[3].History) != 0 {
+		t.Fatalf("after /new %#v", chats[3])
+	}
+	if strings.Count(out.String(), "an answer") != 3 || !strings.Contains(errOut.String(), "chat service error") {
+		t.Fatalf("stdout %q stderr %q", out.String(), errOut.String())
+	}
+}
+
+func TestChatKeepsOnlyTheRecentHistory(t *testing.T) {
+	var chats []api.ChatRequest
+	a, _, _ := contextApp(t, fakeAPI{answer: "ok", chats: &chats}, false)
+	a.In = strings.NewReader(strings.Repeat("again\n", chatHistoryLimit))
+	if code := a.Run([]string{"chat"}); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if last := chats[len(chats)-1]; len(last.History) != chatHistoryLimit || last.History[0].Role != "user" {
+		t.Fatalf("history %d, first role %q", len(last.History), last.History[0].Role)
+	}
+}
+
+func TestChatTakesNoQuestionArgument(t *testing.T) {
+	a, _, errOut := contextApp(t, fakeAPI{}, false)
+	if code := a.Run([]string{"chat", "hello"}); code != 2 || !strings.Contains(errOut.String(), "usage: yggy chat") {
+		t.Fatalf("code %d stderr %q", code, errOut.String())
+	}
+}
+
+func TestRenderShowsMarkdownAsBoldOnlyOnATerminal(t *testing.T) {
+	text := "## Summary\nYou have **6 files** and *one* note."
+	plain := &App{}
+	if plain.render(text) != text {
+		t.Fatalf("plain %q", plain.render(text))
+	}
+	styled := &App{Styled: true}
+	want := "\033[1mSummary\033[22m\nYou have \033[1m6 files\033[22m and *one* note."
+	if got := styled.render(text); got != want {
+		t.Fatalf("styled %q, want %q", got, want)
 	}
 }

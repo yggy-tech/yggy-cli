@@ -17,6 +17,7 @@ var commandUsage = map[string]string{
 	"projects":  "yggy projects",
 	"documents": "yggy documents list [--status STATUS] [--limit N] [--json]\n       yggy documents upload <file>\n       yggy documents wait <id>\n       yggy documents triples <id>",
 	"ask":       "yggy ask <question> [--tier fast|balanced|accurate] [--json]",
+	"chat":      "yggy chat [--tier fast|balanced|accurate]",
 	"query":     "yggy query <question> [--top-k N] [--mode hybrid|lexical|graph] [--include entities,triples,identity] [--json]",
 	"update":    "yggy update [--check] [--version X.Y.Z]",
 	"version":   "yggy version",
@@ -39,6 +40,7 @@ Usage:
   yggy documents triples <id>
 
   yggy ask <question>            get a written answer with its sources
+  yggy chat                      talk with yggy; each question keeps the conversation so far
   yggy query <question>          find the documents that match a question
 
   yggy api                       list the operations of the public API
@@ -52,7 +54,7 @@ Run yggy <command> --help for the options of one command.
 Login stores the API URL and key. In a terminal it offers the browser or an API key; --web
 always uses the browser and prints the address when --no-browser is set. use selects an organization or project
 that this key can already see. Document commands use the selected project.
-ask and query use the selected project, or the whole organization when no project is selected.
+ask, chat and query use the selected project, or the whole organization when no project is selected.
 `)
 }
 

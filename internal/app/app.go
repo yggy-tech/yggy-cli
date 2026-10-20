@@ -28,7 +28,7 @@ type API interface {
 	Triples(ctx context.Context, organization, projectID, documentID string) ([]byte, error)
 	Documents(ctx context.Context, organization, projectID, status string, limit int) (api.DocumentList, error)
 	Query(ctx context.Context, organization, projectID string, req api.QueryRequest) (api.QueryResult, error)
-	Chat(ctx context.Context, organization, projectID, message, tier string) (api.ChatResult, error)
+	Chat(ctx context.Context, organization, projectID string, req api.ChatRequest) (api.ChatResult, error)
 	Call(ctx context.Context, req api.Request, out io.Writer) error
 }
 
@@ -47,6 +47,8 @@ type App struct {
 	API         API
 	Env         func(string) string
 	Interactive bool
+	// Styled is true when stdout is a terminal that takes bold text. Answers then show Markdown emphasis as bold.
+	Styled bool
 	// Version is the running release, or "dev" for a build from source.
 	Version string
 	Updater Updater
@@ -106,6 +108,8 @@ func (a *App) Run(args []string) int {
 		return a.listProjects()
 	case "ask":
 		return a.ask(args[1:])
+	case "chat":
+		return a.chat(args[1:])
 	case "query":
 		return a.query(args[1:])
 	case "api":
