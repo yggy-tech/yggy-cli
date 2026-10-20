@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,8 +11,7 @@ import (
 )
 
 func (a *App) update(args []string) int {
-	fs := flag.NewFlagSet("update", flag.ContinueOnError)
-	fs.SetOutput(a.Err)
+	fs := a.newFlags("update")
 	check := fs.Bool("check", false, "only report whether a newer release exists")
 	target := fs.String("version", "", "install this release instead of the latest, for example 0.2.0")
 	if err := fs.Parse(args); err != nil {

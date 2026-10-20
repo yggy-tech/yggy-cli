@@ -191,6 +191,10 @@ func (c *Client) get(ctx context.Context, path, organization string) ([]byte, er
 }
 
 func (c *Client) do(ctx context.Context, method, path, organization, contentType string, body io.Reader) ([]byte, error) {
+	return c.send(ctx, c.httpClient(), method, path, organization, contentType, body)
+}
+
+func (c *Client) send(ctx context.Context, client *http.Client, method, path, organization, contentType string, body io.Reader) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.base()+path, body)
 	if err != nil {
 		return nil, err
@@ -203,7 +207,7 @@ func (c *Client) do(ctx context.Context, method, path, organization, contentType
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	res, err := c.httpClient().Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -288,28 +292,6 @@ func (c *Client) DocumentStatus(ctx context.Context, organization, projectID, do
 func (c *Client) Triples(ctx context.Context, organization, projectID, documentID string) ([]byte, error) {
 	path := "/api/v1/projects/" + url.PathEscape(projectID) + "/documents/" + url.PathEscape(documentID) + "/triples"
 	return c.get(ctx, path, organization)
-}
-
-func (c *Client) Query(ctx context.Context, organization, projectID, question string) (string, error) {
-	path := "/api/v1/query"
-	if projectID != "" {
-		path = "/api/v1/projects/" + url.PathEscape(projectID) + "/query"
-	}
-	payload, err := json.Marshal(map[string]string{"question": question})
-	if err != nil {
-		return "", err
-	}
-	body, err := c.do(ctx, http.MethodPost, path, organization, "application/json", bytes.NewReader(payload))
-	if err != nil {
-		return "", err
-	}
-	var result struct {
-		Answer string `json:"answer"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("read query: %w", err)
-	}
-	return result.Answer, nil
 }
 
 // Request is one raw call against the API, as `yggy api` builds it.

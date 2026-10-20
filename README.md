@@ -64,8 +64,11 @@ The CLI saves the API URL, the key and your selection in `yggy/config.json` in y
 id="$(yggy documents upload Q4-report.pdf)"
 yggy documents wait "$id"
 yggy documents triples "$id" > q4-facts.json
-yggy query "Which contracts renew in Q1?"
+yggy ask "Which contracts renew in Q1?"
+yggy query "contract renewal Q1"
 ```
+
+`yggy ask` writes an answer and lists the documents it used. `yggy query` only finds the matching documents and ranks them. `yggy orgs`, `yggy projects` and `yggy documents list` show what you can work with. `yggy <command> --help` prints the options of one command.
 
 `yggy api` lists every operation of the public API. `yggy api <operation> name=value` calls one, for example `yggy api getDocumentStatus id=<id>`. `yggy help` prints all commands.
 

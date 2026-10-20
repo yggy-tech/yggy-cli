@@ -31,13 +31,9 @@ func (a *App) apiCommand(args []string) int {
 		fmt.Fprintf(a.Err, "unknown operation %q; run yggy api to list them\n", args[0])
 		return 2
 	}
-	file, code := a.load()
+	file, code := a.orgContext()
 	if code != 0 {
 		return code
-	}
-	if file.Org.Header() == "" {
-		fmt.Fprintln(a.Err, "select an organization first: yggy use org")
-		return 2
 	}
 	req, outPath, err := buildRequest(op, args[1:], file)
 	if err != nil {

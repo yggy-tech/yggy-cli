@@ -23,8 +23,13 @@ type fakeAPI struct {
 	status     api.DocumentStatus
 	triples    []byte
 	answer     string
+	contexts   []api.QueryContext
+	documents  []api.Document
+	total      int
 	err        error
 	calls      *[]api.Request
+	queries    *[]api.QueryRequest
+	asked      *[]string
 }
 
 func (f fakeAPI) Call(_ context.Context, req api.Request, out io.Writer) error {
@@ -79,14 +84,42 @@ func (f fakeAPI) Triples(context.Context, string, string, string) ([]byte, error
 	return f.triples, nil
 }
 
-func (f fakeAPI) Query(context.Context, string, string, string) (string, error) {
+func (f fakeAPI) Query(_ context.Context, _, _ string, req api.QueryRequest) (api.QueryResult, error) {
 	if f.err != nil {
-		return "", f.err
+		return api.QueryResult{}, f.err
 	}
-	if f.answer == "" {
-		return "an answer", nil
+	if f.queries != nil {
+		*f.queries = append(*f.queries, req)
 	}
-	return f.answer, nil
+	contexts := f.contexts
+	if contexts == nil {
+		contexts = []api.QueryContext{{DocumentID: "doc-1", Title: "Q4 report", Snippet: "Q4 changed.", Score: 1}}
+	}
+	return api.QueryResult{Answer: f.answer, Contexts: contexts, Raw: []byte(`{"answer":""}`)}, nil
+}
+
+func (f fakeAPI) Chat(_ context.Context, _, projectID, message, tier string) (api.ChatResult, error) {
+	if f.err != nil {
+		return api.ChatResult{}, f.err
+	}
+	if f.asked != nil {
+		*f.asked = append(*f.asked, projectID+"|"+message+"|"+tier)
+	}
+	return api.ChatResult{
+		Response: f.answer,
+		Citations: []api.ChatCitation{
+			{DocumentID: "doc-1", Source: "q4-report", Snippet: "revenue grew"},
+			{DocumentID: "doc-1", Snippet: "again"},
+			{DocumentID: "doc-2"},
+		},
+	}, nil
+}
+
+func (f fakeAPI) Documents(context.Context, string, string, string, int) (api.DocumentList, error) {
+	if f.err != nil {
+		return api.DocumentList{}, f.err
+	}
+	return api.DocumentList{Documents: f.documents, Total: f.total}, nil
 }
 
 func TestLoginSelectsTheOnlyOrg(t *testing.T) {
@@ -530,5 +563,153 @@ func TestInteractiveLoginCanStillUseAPastedKey(t *testing.T) {
 	}
 	if file, _ := config.Load(path); file.APIKey != "ygg_pasted" || len(opened) != 0 {
 		t.Fatalf("stored %q opened %v", file.APIKey, opened)
+	}
+}
+
+func contextApp(t *testing.T, fake fakeAPI, withProject bool) (*App, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.json")
+	file := config.File{BaseURL: "https://api.yggy.tech", APIKey: "ygg_org_test"}
+	file.SetOrg("org-1", "acme-corp", "Acme")
+	if withProject {
+		file.SetProject("proj-1", "diligence", "Diligence")
+	}
+	if err := config.Save(path, file); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
+	return &App{Out: out, Err: errOut, ConfigPath: path, API: fake}, out, errOut
+}
+
+func TestQueryListsTheRankedDocumentsAndTakesFlagsAnywhere(t *testing.T) {
+	var queries []api.QueryRequest
+	a, out, errOut := contextApp(t, fakeAPI{answer: "Q4 changed.", queries: &queries}, true)
+	if code := a.Run([]string{"query", "what", "changed", "--top-k", "3", "in", "Q4?", "--include", "entities, triples"}); code != 0 {
+		t.Fatalf("code %d stderr %s", code, errOut.String())
+	}
+	want := api.QueryRequest{Question: "what changed in Q4?", TopK: 3, Include: []string{"entities", "triples"}}
+	if len(queries) != 1 || queries[0].Question != want.Question || queries[0].TopK != 3 || strings.Join(queries[0].Include, ",") != "entities,triples" {
+		t.Fatalf("queries %#v", queries)
+	}
+	for _, line := range []string{"Q4 changed.", "Documents", "1. Q4 report  1.00  doc-1"} {
+		if !strings.Contains(out.String(), line) {
+			t.Fatalf("stdout %q lacks %q", out.String(), line)
+		}
+	}
+}
+
+func TestQueryRejectsBadFlagsBeforeCallingTheAPI(t *testing.T) {
+	var queries []api.QueryRequest
+	a, _, errOut := contextApp(t, fakeAPI{queries: &queries}, true)
+	for _, args := range [][]string{
+		{"query", "x", "--mode", "fuzzy"},
+		{"query", "x", "--include", "everything"},
+		{"query", "x", "--top-k", "99"},
+		{"query", "x", "--nope"},
+	} {
+		if code := a.Run(args); code != 2 {
+			t.Fatalf("%v: code %d", args, code)
+		}
+	}
+	if len(queries) != 0 {
+		t.Fatalf("called the API with %v", queries)
+	}
+	if !strings.Contains(errOut.String(), "usage: yggy query <question>") {
+		t.Fatalf("stderr %q", errOut.String())
+	}
+}
+
+func TestQueryWithNothingFoundPointsToAsk(t *testing.T) {
+	a, out, errOut := contextApp(t, fakeAPI{contexts: []api.QueryContext{}}, false)
+	if code := a.Run([]string{"query", "what can you do"}); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if out.Len() != 0 || !strings.Contains(errOut.String(), "yggy ask") {
+		t.Fatalf("stdout %q stderr %q", out.String(), errOut.String())
+	}
+}
+
+func TestQueryJSONPrintsTheAPIResponse(t *testing.T) {
+	a, out, _ := contextApp(t, fakeAPI{}, true)
+	if code := a.Run([]string{"query", "--json", "x"}); code != 0 || out.String() != "{\n  \"answer\": \"\"\n}\n" {
+		t.Fatalf("code %d stdout %q", code, out.String())
+	}
+}
+
+func TestAskAnswersWithItsSourcesOncePerDocument(t *testing.T) {
+	var asked []string
+	a, out, errOut := contextApp(t, fakeAPI{answer: "Revenue grew 12%.\n", asked: &asked}, false)
+	if code := a.Run([]string{"ask", "--tier", "fast", "how", "did", "revenue", "change?"}); code != 0 {
+		t.Fatalf("code %d stderr %s", code, errOut.String())
+	}
+	if len(asked) != 1 || asked[0] != "|how did revenue change?|fast" {
+		t.Fatalf("asked %v", asked)
+	}
+	want := "Revenue grew 12%.\n\nSources\n  1. q4-report\n     revenue grew\n  2. doc-2\n"
+	if out.String() != want {
+		t.Fatalf("stdout %q, want %q", out.String(), want)
+	}
+}
+
+func TestAskWithoutAQuestionPrintsItsUsage(t *testing.T) {
+	a, out, errOut := contextApp(t, fakeAPI{}, false)
+	if code := a.Run([]string{"ask"}); code != 2 {
+		t.Fatalf("code %d", code)
+	}
+	if errOut.String() != "usage: yggy ask <question> [--tier fast|balanced|accurate] [--json]\n" || out.Len() != 0 {
+		t.Fatalf("stdout %q stderr %q", out.String(), errOut.String())
+	}
+	if code := a.Run([]string{"ask", "x", "--tier", "slow"}); code != 2 {
+		t.Fatalf("bad tier: code %d", code)
+	}
+}
+
+func TestCommandHelpPrintsOnlyThatCommand(t *testing.T) {
+	a, out, errOut := contextApp(t, fakeAPI{}, false)
+	if code := a.Run([]string{"query", "--help"}); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if !strings.HasPrefix(out.String(), "usage: yggy query <question>") || strings.Contains(out.String(), "yggy auth login") || errOut.Len() != 0 {
+		t.Fatalf("stdout %q stderr %q", out.String(), errOut.String())
+	}
+	out.Reset()
+	if code := a.Run([]string{"documents"}); code != 2 || !strings.Contains(errOut.String(), "yggy documents list") || strings.Contains(errOut.String(), "yggy auth login") {
+		t.Fatalf("code %d stderr %q", code, errOut.String())
+	}
+}
+
+func TestOrgsAndProjectsMarkTheSelection(t *testing.T) {
+	a, out, _ := contextApp(t, fakeAPI{
+		orgs:     []api.Org{{ID: "org-1", Slug: "acme-corp", Name: "Acme"}, {ID: "org-2", Slug: "other", Name: "Other"}},
+		projects: []api.Project{{ID: "proj-1", Slug: "diligence", Name: "Diligence"}, {ID: "proj-2", Slug: "hr", Name: "HR"}},
+	}, true)
+	if code := a.Run([]string{"orgs"}); code != 0 {
+		t.Fatalf("orgs code %d", code)
+	}
+	if code := a.Run([]string{"projects"}); code != 0 {
+		t.Fatalf("projects code %d", code)
+	}
+	want := "*  acme-corp  Acme\n   other      Other\n*  diligence  Diligence\n   hr         HR\n"
+	if out.String() != want {
+		t.Fatalf("stdout %q, want %q", out.String(), want)
+	}
+}
+
+func TestDocumentsListShowsATableAndTheRemainder(t *testing.T) {
+	a, out, errOut := contextApp(t, fakeAPI{
+		documents: []api.Document{{ID: "doc-1", Title: "Q4 report", Status: "COMPLETED", TripleCount: 42}},
+		total:     3,
+	}, true)
+	if code := a.Run([]string{"documents", "list", "--limit", "1"}); code != 0 {
+		t.Fatalf("code %d stderr %s", code, errOut.String())
+	}
+	if out.String() != "ID     STATUS     TRIPLES  TITLE\ndoc-1  completed  42       Q4 report\n" {
+		t.Fatalf("stdout %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), "showing 1 of 3") {
+		t.Fatalf("stderr %q", errOut.String())
+	}
+	if code := a.Run([]string{"documents", "list", "--status", "done"}); code != 2 {
+		t.Fatalf("bad status: code %d", code)
 	}
 }
