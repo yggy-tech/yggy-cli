@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -100,7 +101,11 @@ func TestUploadAndQueryPaths(t *testing.T) {
 			_, _ = w.Write([]byte(`{"documentId":"doc-9","status":"queued"}`))
 		case "/api/v1/projects/proj-1/query":
 			sawQuery = true
-			_, _ = w.Write([]byte(`{"answer":"Q4 changed.","contexts":[]}`))
+			body, _ := io.ReadAll(r.Body)
+			if string(body) != `{"question":"what changed?","topK":3,"include":["entities"]}` {
+				t.Errorf("query body = %s", body)
+			}
+			_, _ = w.Write([]byte(`{"answer":"Q4 changed.","contexts":[{"documentId":"doc-9","title":"Q4 report","snippet":"Q4 changed.","score":1}]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -112,9 +117,50 @@ func TestUploadAndQueryPaths(t *testing.T) {
 	if err != nil || id != "doc-9" || !sawUpload {
 		t.Fatalf("id = %s err = %v saw = %v", id, err, sawUpload)
 	}
-	answer, err := client.Query(context.Background(), "acme-corp", "proj-1", "what changed?")
-	if err != nil || answer != "Q4 changed." || !sawQuery {
-		t.Fatalf("answer = %s err = %v saw = %v", answer, err, sawQuery)
+	result, err := client.Query(context.Background(), "acme-corp", "proj-1", QueryRequest{Question: "what changed?", TopK: 3, Include: []string{"entities"}})
+	if err != nil || result.Answer != "Q4 changed." || len(result.Contexts) != 1 || result.Contexts[0].Title != "Q4 report" || !sawQuery {
+		t.Fatalf("result = %#v err = %v saw = %v", result, err, sawQuery)
+	}
+}
+
+func TestChatUsesTheProjectOrTheOrganization(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != `{"message":"who founded Acme?","options":{"tier":"fast"}}` {
+			t.Errorf("body = %s", body)
+		}
+		_, _ = w.Write([]byte(`{"success":true,"data":{"response":"Jane Doe.","citations":[{"documentId":"doc-1","snippet":"founded by Jane"}],"metadata":{"processingTimeMs":5,"tierApplied":"fast"}}}`))
+	}))
+	defer server.Close()
+
+	client := &Client{BaseURL: server.URL, APIKey: "ygg_k", HTTP: server.Client()}
+	result, err := client.Chat(context.Background(), "org-1", "proj-1", "who founded Acme?", "fast")
+	if err != nil || result.Response != "Jane Doe." || len(result.Citations) != 1 || result.Citations[0].DocumentID != "doc-1" {
+		t.Fatalf("result = %#v err = %v", result, err)
+	}
+	if _, err := client.Chat(context.Background(), "org-1", "", "who founded Acme?", "fast"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(paths, " ") != "/api/v1/projects/proj-1/chat /api/v1/chat" {
+		t.Fatalf("paths = %v", paths)
+	}
+}
+
+func TestDocumentsSendsTheFilters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/projects/proj-1/documents" || r.URL.Query().Get("status") != "failed" || r.URL.Query().Get("limit") != "5" {
+			t.Errorf("request = %s", r.URL)
+		}
+		_, _ = w.Write([]byte(`{"documents":[{"documentId":"doc-1","title":"Q4","status":"FAILED","tripleCount":0}],"total":7,"limit":5,"offset":0}`))
+	}))
+	defer server.Close()
+
+	client := &Client{BaseURL: server.URL, APIKey: "ygg_k", HTTP: server.Client()}
+	list, err := client.Documents(context.Background(), "org-1", "proj-1", "failed", 5)
+	if err != nil || list.Total != 7 || len(list.Documents) != 1 || list.Documents[0].Status != "FAILED" {
+		t.Fatalf("list = %#v err = %v", list, err)
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -27,7 +26,9 @@ type API interface {
 	Upload(ctx context.Context, organization, projectID, filePath string) (string, error)
 	DocumentStatus(ctx context.Context, organization, projectID, documentID string) (api.DocumentStatus, error)
 	Triples(ctx context.Context, organization, projectID, documentID string) ([]byte, error)
-	Query(ctx context.Context, organization, projectID, question string) (string, error)
+	Documents(ctx context.Context, organization, projectID, status string, limit int) (api.DocumentList, error)
+	Query(ctx context.Context, organization, projectID string, req api.QueryRequest) (api.QueryResult, error)
+	Chat(ctx context.Context, organization, projectID, message, tier string) (api.ChatResult, error)
 	Call(ctx context.Context, req api.Request, out io.Writer) error
 }
 
@@ -62,6 +63,9 @@ func (a *App) Run(args []string) int {
 		a.usage()
 		return 2
 	}
+	if _, known := commandUsage[args[0]]; known && asksForHelp(args[1:]) {
+		return a.commandHelp(args[0])
+	}
 	switch args[0] {
 	case "help", "-h", "--help":
 		a.usage()
@@ -75,14 +79,12 @@ func (a *App) Run(args []string) int {
 		return a.showContext()
 	case "auth":
 		if len(args) < 2 || args[1] != "login" {
-			a.usage()
-			return 2
+			return a.misuse("auth")
 		}
 		return a.login(args[2:])
 	case "use":
 		if len(args) < 2 {
-			a.usage()
-			return 2
+			return a.misuse("use")
 		}
 		name := ""
 		if len(args) >= 3 {
@@ -94,17 +96,18 @@ func (a *App) Run(args []string) int {
 		case "project":
 			return a.useProject(name)
 		default:
-			a.usage()
-			return 2
+			return a.misuse("use")
 		}
 	case "documents":
 		return a.documents(args[1:])
+	case "orgs":
+		return a.listOrgs()
+	case "projects":
+		return a.listProjects()
+	case "ask":
+		return a.ask(args[1:])
 	case "query":
-		if len(args) < 2 {
-			a.usage()
-			return 2
-		}
-		return a.query(strings.Join(args[1:], " "))
+		return a.query(args[1:])
 	case "api":
 		return a.apiCommand(args[1:])
 	default:
@@ -114,36 +117,8 @@ func (a *App) Run(args []string) int {
 	}
 }
 
-func (a *App) usage() {
-	fmt.Fprint(a.Err, `yggy — CLI for the yggy API
-
-Usage:
-  yggy auth login [--base-url URL] [--api-key KEY | --web] [--no-browser]
-  yggy use org [name]
-  yggy use project [name]
-  yggy context
-
-  yggy documents upload <file>
-  yggy documents wait <id>
-  yggy documents triples <id>
-  yggy query <question>
-
-  yggy api                       list the operations of the public API
-  yggy api <operation> [args]    call one, e.g. yggy api getDocumentStatus id=<id>
-
-  yggy update [--check] [--version X.Y.Z]   update yggy to the latest release
-  yggy version
-
-Login stores the API URL and key. In a terminal it offers the browser or an API key; --web
-always uses the browser and prints the address when --no-browser is set. use selects an organization or project
-that this key can already see. Document commands use the selected project.
-query uses the selected project, or the whole organization when no project is selected.
-`)
-}
-
 func (a *App) login(args []string) int {
-	fs := flag.NewFlagSet("login", flag.ContinueOnError)
-	fs.SetOutput(a.Err)
+	fs := a.newFlags("auth")
 	baseFlag := fs.String("base-url", "", "API base URL")
 	keyFlag := fs.String("api-key", "", "API key")
 	webFlag := fs.Bool("web", false, "log in with your browser instead of an API key")
@@ -266,13 +241,9 @@ func (a *App) useOrg(name string) int {
 }
 
 func (a *App) useProject(name string) int {
-	file, code := a.load()
+	file, code := a.orgContext()
 	if code != 0 {
 		return code
-	}
-	if file.Org.Header() == "" {
-		fmt.Fprintln(a.Err, "select an organization first: yggy use org")
-		return 2
 	}
 	projects, err := a.client(file).Projects(context.Background(), file.Org.Header())
 	if err != nil {
@@ -297,32 +268,24 @@ func (a *App) useProject(name string) int {
 }
 
 func (a *App) documents(args []string) int {
-	if len(args) < 1 {
-		a.usage()
-		return 2
+	if len(args) == 0 {
+		return a.misuse("documents")
+	}
+	if args[0] == "list" {
+		return a.listDocuments(args[1:])
+	}
+	if len(args) != 2 {
+		return a.misuse("documents")
 	}
 	switch args[0] {
 	case "upload":
-		if len(args) != 2 {
-			a.usage()
-			return 2
-		}
 		return a.upload(args[1])
 	case "wait":
-		if len(args) != 2 {
-			a.usage()
-			return 2
-		}
 		return a.wait(args[1])
 	case "triples":
-		if len(args) != 2 {
-			a.usage()
-			return 2
-		}
 		return a.triples(args[1])
 	default:
-		a.usage()
-		return 2
+		return a.misuse("documents")
 	}
 }
 
@@ -382,32 +345,10 @@ func (a *App) triples(documentID string) int {
 	return 0
 }
 
-func (a *App) query(question string) int {
-	file, code := a.load()
-	if code != 0 {
-		return code
-	}
-	if file.Org.Header() == "" {
-		fmt.Fprintln(a.Err, "select an organization first: yggy use org")
-		return 2
-	}
-	answer, err := a.client(file).Query(context.Background(), file.Org.Header(), file.Project.ID, question)
-	if err != nil {
-		fmt.Fprintln(a.Err, err)
-		return 1
-	}
-	fmt.Fprintln(a.Out, answer)
-	return 0
-}
-
 func (a *App) projectContext() (config.File, int) {
-	file, code := a.load()
+	file, code := a.orgContext()
 	if code != 0 {
 		return file, code
-	}
-	if file.Org.Header() == "" {
-		fmt.Fprintln(a.Err, "select an organization first: yggy use org")
-		return file, 2
 	}
 	if file.Project.ID == "" {
 		fmt.Fprintln(a.Err, "select a project first: yggy use project")
