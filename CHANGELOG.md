@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/yggy-tech/yggy-cli/compare/v0.2.0...v0.3.0) (2026-10-20)
+
+
+### Features
+
+* **yggy-cli:** yggy chat keeps a conversation; answers render bold in a terminal ([575e96b](https://github.com/yggy-tech/yggy-cli/commit/575e96bbf3570f2450c0f90c843c349bd0786b9a))
+
 ## [0.2.0](https://github.com/yggy-tech/yggy-cli/compare/v0.1.0...v0.2.0) (2026-10-20)
 
 
