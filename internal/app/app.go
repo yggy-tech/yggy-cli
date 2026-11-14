@@ -114,6 +114,8 @@ func (a *App) Run(args []string) int {
 		return a.query(args[1:])
 	case "api":
 		return a.apiCommand(args[1:])
+	case "migration":
+		return a.migrationCommand(args[1:])
 	default:
 		fmt.Fprintf(a.Err, "unknown command %q\n", args[0])
 		a.usage()
