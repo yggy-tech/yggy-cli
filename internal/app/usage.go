@@ -19,6 +19,7 @@ var commandUsage = map[string]string{
 	"ask":       "yggy ask <question> [--tier fast|balanced|accurate] [--json]",
 	"chat":      "yggy chat [--tier fast|balanced|accurate]",
 	"query":     "yggy query <question> [--top-k N] [--mode hybrid|lexical|graph] [--include entities,triples,identity] [--json]",
+	"migration": "yggy migration upload <project> <dir> [--snapshot LABEL] [--capture-date YYYY-MM-DD] [--scope TEXT] [--close] [--parallel N] [--quiet] [--json]",
 	"update":    "yggy update [--check] [--version X.Y.Z]",
 	"version":   "yggy version",
 }
@@ -45,6 +46,8 @@ Usage:
 
   yggy api                       list the operations of the public API
   yggy api <operation> [args]    call one, e.g. yggy api getDocumentStatus id=<id>
+
+  yggy migration upload <project> <dir> [--snapshot LABEL] [--capture-date YYYY-MM-DD] [--scope TEXT] [--close] [--parallel N] [--quiet] [--json]
 
   yggy update [--check] [--version X.Y.Z]   update yggy to the latest release
   yggy version
