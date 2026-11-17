@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/yggy-tech/yggy-cli/compare/v0.3.0...v0.4.0) (2026-11-17)
+
+
+### Features
+
+* **cli:** log in through the browser unless a key is given ([f88df48](https://github.com/yggy-tech/yggy-cli/commit/f88df486012fbc0c57fb28b81a6f7c1df8bdea68))
+* **yggy-cli:** yggy migration upload ([f88df48](https://github.com/yggy-tech/yggy-cli/commit/f88df486012fbc0c57fb28b81a6f7c1df8bdea68))
+
+
+### Bug Fixes
+
+* **cli:** describe the browser login in the help, accept upgrade for update ([f88df48](https://github.com/yggy-tech/yggy-cli/commit/f88df486012fbc0c57fb28b81a6f7c1df8bdea68))
+* **yggy-cli:** regenerate the operation table for the new query summaries ([f88df48](https://github.com/yggy-tech/yggy-cli/commit/f88df486012fbc0c57fb28b81a6f7c1df8bdea68))
+
 ## [0.3.0](https://github.com/yggy-tech/yggy-cli/compare/v0.2.0...v0.3.0) (2026-10-20)
 
 
