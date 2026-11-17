@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"testing/iotest"
 
 	"github.com/yggy-tech/yggy-cli/internal/api"
 	"github.com/yggy-tech/yggy-cli/internal/config"
@@ -392,6 +391,14 @@ func TestUpdateDoesNothingWhenCurrent(t *testing.T) {
 	}
 }
 
+func TestUpgradeIsAnotherNameForUpdate(t *testing.T) {
+	var installed []string
+	a, out, _ := updateApp("0.2.0", fakeUpdater{latest: "0.2.0", installed: &installed})
+	if code := a.Run([]string{"upgrade"}); code != 0 || !strings.Contains(out.String(), "up to date") {
+		t.Fatalf("code %d, out %q", code, out.String())
+	}
+}
+
 func TestUpdateCheckOnlyReports(t *testing.T) {
 	var installed []string
 	a, out, _ := updateApp("0.1.0", fakeUpdater{latest: "0.2.0", installed: &installed})
@@ -539,33 +546,31 @@ func TestWebLoginReportsDenialAndStoresNothing(t *testing.T) {
 	}
 }
 
-func TestInteractiveLoginOffersTheBrowserFirst(t *testing.T) {
+func TestLoginWithoutAKeyUsesTheBrowser(t *testing.T) {
 	var opened []string
 	a, path, _, errOut := webApp(t, &fakeDevice{key: "ygg_from_browser"}, &opened)
-	a.Interactive = true
-	a.In = iotest.OneByteReader(strings.NewReader("\n"))
+	// No terminal, no flag: the browser login still runs, so `yggy auth login` works from any shell.
 	if code := a.Run([]string{"auth", "login", "--base-url", "https://api.yggy.tech"}); code != 0 {
 		t.Fatalf("code %d stderr %s", code, errOut.String())
 	}
-	if !strings.Contains(errOut.String(), "How do you want to log in?") {
-		t.Fatalf("stderr %q", errOut.String())
-	}
-	if file, _ := config.Load(path); file.APIKey != "ygg_from_browser" {
-		t.Fatalf("stored %q", file.APIKey)
+	if file, _ := config.Load(path); file.APIKey != "ygg_from_browser" || len(opened) != 1 {
+		t.Fatalf("stored %q opened %v", file.APIKey, opened)
 	}
 }
 
-func TestInteractiveLoginCanStillUseAPastedKey(t *testing.T) {
+func TestLoginWithAKeyFromTheEnvironmentSkipsTheBrowser(t *testing.T) {
 	var opened []string
-	device := &fakeDevice{key: "ygg_from_browser"}
-	a, path, _, _ := webApp(t, device, &opened)
-	a.Interactive = true
-	// One byte per read, like a terminal, so each prompt takes only its own line.
-	a.In = iotest.OneByteReader(strings.NewReader("2\nygg_pasted\n"))
+	a, path, _, _ := webApp(t, &fakeDevice{key: "ygg_from_browser"}, &opened)
+	a.Env = func(key string) string {
+		if key == "YGGY_API_KEY" {
+			return "ygg_from_env"
+		}
+		return ""
+	}
 	if code := a.Run([]string{"auth", "login", "--base-url", "https://api.yggy.tech"}); code != 0 {
 		t.Fatalf("code %d", code)
 	}
-	if file, _ := config.Load(path); file.APIKey != "ygg_pasted" || len(opened) != 0 {
+	if file, _ := config.Load(path); file.APIKey != "ygg_from_env" || len(opened) != 0 {
 		t.Fatalf("stored %q opened %v", file.APIKey, opened)
 	}
 }

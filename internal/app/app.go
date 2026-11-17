@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"github.com/yggy-tech/yggy-cli/internal/api"
 	"github.com/yggy-tech/yggy-cli/internal/config"
 	"github.com/yggy-tech/yggy-cli/internal/pick"
-	"golang.org/x/term"
 )
 
 const defaultBaseURL = "https://api.yggy.tech"
@@ -42,7 +40,6 @@ type App struct {
 	In          io.Reader
 	Out         io.Writer
 	Err         io.Writer
-	InFile      *os.File
 	ConfigPath  string
 	API         API
 	Env         func(string) string
@@ -75,7 +72,7 @@ func (a *App) Run(args []string) int {
 	case "version", "-v", "--version":
 		fmt.Fprintf(a.Out, "yggy %s\n", a.Version)
 		return 0
-	case "update":
+	case "update", "upgrade":
 		return a.update(args[1:])
 	case "context":
 		return a.showContext()
@@ -114,6 +111,8 @@ func (a *App) Run(args []string) int {
 		return a.query(args[1:])
 	case "api":
 		return a.apiCommand(args[1:])
+	case "migration":
+		return a.migrationCommand(args[1:])
 	default:
 		fmt.Fprintf(a.Err, "unknown command %q\n", args[0])
 		a.usage()
@@ -124,8 +123,8 @@ func (a *App) Run(args []string) int {
 func (a *App) login(args []string) int {
 	fs := a.newFlags("auth")
 	baseFlag := fs.String("base-url", "", "API base URL")
-	keyFlag := fs.String("api-key", "", "API key")
-	webFlag := fs.Bool("web", false, "log in with your browser instead of an API key")
+	keyFlag := fs.String("api-key", "", "API key, for scripts and CI (else the browser login)")
+	webFlag := fs.Bool("web", false, "log in with your browser (the default; ignores YGGY_API_KEY)")
 	noBrowserFlag := fs.Bool("no-browser", false, "print the login address instead of opening it")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -144,44 +143,18 @@ func (a *App) login(args []string) int {
 		fmt.Fprintln(a.Err, "--web and --api-key cannot be combined")
 		return 2
 	}
+	// A key from the flag or the environment is for scripts and CI. Without one the login runs in the browser.
 	key := ""
 	if !*webFlag {
 		key = firstNonEmpty(*keyFlag, a.env("YGGY_API_KEY"))
 	}
-	useBrowser := *webFlag
-	if key == "" && !useBrowser && a.Interactive {
-		choice, err := a.promptLine("How do you want to log in?\n  1) in your browser\n  2) with an API key\nChoose [1]: ")
-		if err != nil {
-			fmt.Fprintln(a.Err, err)
-			return 1
-		}
-		switch strings.TrimSpace(choice) {
-		case "", "1":
-			useBrowser = true
-		case "2":
-		default:
-			fmt.Fprintln(a.Err, "choose 1 or 2")
-			return 2
-		}
-	}
+	useBrowser := key == ""
 	if useBrowser {
 		granted, code := a.browserLogin(context.Background(), strings.TrimRight(base, "/"), *noBrowserFlag)
 		if code != 0 {
 			return code
 		}
 		key = granted
-	}
-	if key == "" {
-		entered, err := a.promptSecret("API key: ")
-		if err != nil {
-			fmt.Fprintln(a.Err, err)
-			return 1
-		}
-		key = entered
-	}
-	if key == "" {
-		fmt.Fprintln(a.Err, "an API key is required")
-		return 2
 	}
 
 	file := config.File{BaseURL: strings.TrimRight(base, "/"), APIKey: key}
@@ -455,19 +428,6 @@ func (a *App) env(key string) string {
 
 func (a *App) promptLine(prompt string) (string, error) {
 	fmt.Fprint(a.Err, prompt)
-	return a.readLine()
-}
-
-func (a *App) promptSecret(prompt string) (string, error) {
-	fmt.Fprint(a.Err, prompt)
-	if a.Interactive && a.InFile != nil && term.IsTerminal(int(a.InFile.Fd())) {
-		buf, err := term.ReadPassword(int(a.InFile.Fd()))
-		fmt.Fprintln(a.Err)
-		if err != nil {
-			return "", err
-		}
-		return strings.TrimSpace(string(buf)), nil
-	}
 	return a.readLine()
 }
 
