@@ -23,7 +23,6 @@ func main() {
 		In:          os.Stdin,
 		Out:         os.Stdout,
 		Err:         os.Stderr,
-		InFile:      os.Stdin,
 		ConfigPath:  path,
 		Env:         os.Getenv,
 		Interactive: term.IsTerminal(int(os.Stdin.Fd())),

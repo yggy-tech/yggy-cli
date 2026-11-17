@@ -10,7 +10,7 @@ import (
 // commandUsage is the usage of each command, shown by `yggy <command> --help` and when its arguments are wrong.
 // `api` lists its own operations instead.
 var commandUsage = map[string]string{
-	"auth":      "yggy auth login [--base-url URL] [--api-key KEY | --web] [--no-browser]",
+	"auth":      "yggy auth login [--base-url URL] [--api-key KEY] [--no-browser]",
 	"use":       "yggy use org [name]\n       yggy use project [name]",
 	"context":   "yggy context",
 	"orgs":      "yggy orgs",
@@ -19,6 +19,7 @@ var commandUsage = map[string]string{
 	"ask":       "yggy ask <question> [--tier fast|balanced|accurate] [--json]",
 	"chat":      "yggy chat [--tier fast|balanced|accurate]",
 	"query":     "yggy query <question> [--top-k N] [--mode hybrid|lexical|graph] [--include entities,triples,identity] [--json]",
+	"migration": "yggy migration upload <project> <dir> [--snapshot LABEL] [--capture-date YYYY-MM-DD] [--scope TEXT] [--close] [--parallel N] [--quiet] [--json]",
 	"update":    "yggy update [--check] [--version X.Y.Z]",
 	"version":   "yggy version",
 }
@@ -27,7 +28,7 @@ func (a *App) usage() {
 	fmt.Fprint(a.Err, `yggy — CLI for the yggy API
 
 Usage:
-  yggy auth login [--base-url URL] [--api-key KEY | --web] [--no-browser]
+  yggy auth login [--base-url URL] [--api-key KEY] [--no-browser]
   yggy use org [name]
   yggy use project [name]
   yggy context
@@ -46,13 +47,15 @@ Usage:
   yggy api                       list the operations of the public API
   yggy api <operation> [args]    call one, e.g. yggy api getDocumentStatus id=<id>
 
+  yggy migration upload <project> <dir> [--snapshot LABEL] [--capture-date YYYY-MM-DD] [--scope TEXT] [--close] [--parallel N] [--quiet] [--json]
+
   yggy update [--check] [--version X.Y.Z]   update yggy to the latest release
   yggy version
 
 Run yggy <command> --help for the options of one command.
 
-Login stores the API URL and key. In a terminal it offers the browser or an API key; --web
-always uses the browser and prints the address when --no-browser is set. use selects an organization or project
+Login stores the API URL and key. Without --api-key or YGGY_API_KEY it logs in through the browser,
+and prints the address instead of opening it when --no-browser is set. use selects an organization or project
 that this key can already see. Document commands use the selected project.
 ask, chat and query use the selected project, or the whole organization when no project is selected.
 `)
