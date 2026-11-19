@@ -30,5 +30,6 @@ func main() {
 		Version:     version.Version,
 		Updater:     update.New(runtime.GOOS, runtime.GOARCH),
 		OpenBrowser: browser.Open,
+		Restart:     restart,
 	}).Run(os.Args[1:]))
 }
