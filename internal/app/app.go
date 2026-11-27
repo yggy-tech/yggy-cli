@@ -55,6 +55,10 @@ type App struct {
 	NewDeviceLogin func(baseURL string) DeviceLogin
 	// OpenBrowser opens a page in the default browser. Without it the login only prints the address.
 	OpenBrowser func(url string) error
+	// Restart runs the command again on the binary at exe after an update and returns its exit code.
+	Restart func(exe string, args []string) int
+	// Now returns the current time. It defaults to time.Now.
+	Now func() time.Time
 }
 
 func (a *App) Run(args []string) int {
@@ -64,6 +68,9 @@ func (a *App) Run(args []string) int {
 	}
 	if _, known := commandUsage[args[0]]; known && asksForHelp(args[1:]) {
 		return a.commandHelp(args[0])
+	}
+	if code := a.offerUpdate(args); code >= 0 {
+		return code
 	}
 	switch args[0] {
 	case "help", "-h", "--help":
